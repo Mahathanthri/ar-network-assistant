@@ -1,0 +1,1062 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>Markerless AR - AR Network Assistant</title>
+
+    <!-- Pinned to 1.6.0 to match marker.html, where router.glb/switch.glb
+         are confirmed to render correctly - a newer A-Frame/three.js
+         GLTFLoader combination failed to draw these particular quantized
+         exports (KHR_mesh_quantization + EXT_texture_webp) at all. -->
+    <script src="https://aframe.io/releases/1.6.0/aframe.min.js"></script>
+    <link rel="stylesheet" href="css/style.css">
+
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            touch-action: none;
+            -webkit-touch-callout: none;
+            -webkit-user-select: none;
+            user-select: none;
+        }
+
+        #startArButton {
+            pointer-events: auto;
+            display: block;
+            width: 100%;
+            padding: 16px;
+            margin: 14px 0 0 0;
+            border: none;
+            border-radius: 14px;
+            font-size: 16px;
+            font-weight: 700;
+            color: #ffffff;
+            background: #2563eb;
+            box-shadow: 0 4px 14px 0 rgba(37, 99, 235, 0.39);
+        }
+
+        #startArButton:disabled {
+            background: #475569;
+            box-shadow: none;
+        }
+
+        #unsupportedNotice {
+            display: none;
+            margin-top: 10px;
+            font-size: 13px;
+            color: #fcd34d;
+            line-height: 1.5;
+        }
+
+        #overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            z-index: 10;
+        }
+
+        .interactive {
+            pointer-events: auto;
+        }
+
+        #forcePlaceButton {
+            width: 100%;
+            padding: 12px;
+            margin: 8px 0 0 0;
+            border: 1px solid rgba(226, 232, 240, 0.35);
+            border-radius: 12px;
+            font-size: 13px;
+            font-weight: 600;
+            color: #e2e8f0;
+            background: rgba(30, 41, 59, 0.85);
+        }
+
+        #btnSimulate[disabled], #btnGateway[disabled] {
+            opacity: 0.4;
+            pointer-events: none;
+        }
+
+        .ar-controls-bar {
+            flex-wrap: wrap;
+        }
+
+        .ar-zoom-control {
+            position: fixed;
+            top: 76px;
+            left: 20px;
+            z-index: 999;
+            display: none;
+            gap: 8px;
+        }
+
+        .ar-zoom-btn {
+            pointer-events: auto;
+            width: 36px;
+            height: 36px;
+            border: 1px solid rgba(255, 255, 255, 0.15);
+            border-radius: 10px;
+            background: rgba(15, 23, 42, 0.85);
+            backdrop-filter: blur(8px);
+            color: white;
+            font-size: 18px;
+            font-weight: 700;
+            line-height: 1;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+        }
+
+        .ar-zoom-btn:active {
+            transform: scale(0.92);
+        }
+    </style>
+</head>
+
+<body>
+
+    <!-- Plays only on a successful cable connection (see connectCable() in
+         the script) - not on a failed drop, not on fixing a fault, just the
+         one "link established" moment. -->
+    <audio id="connectSound" src="assets/audioC.wav" preload="auto"></audio>
+
+    <div id="overlay">
+        <!-- Header -->
+        <div class="ar-header">
+            <a href="index.html" class="back-btn interactive">← Home</a>
+            <div class="ar-status-badge interactive">
+                <div class="dot-indicator" id="statusDot"></div>
+                <span id="statusText">Detecting Surface...</span>
+            </div>
+        </div>
+
+        <!-- Compact zoom control - top-left, below the header, so it stays
+             out of the way of the (already crowded) bottom controls bar. -->
+        <div class="ar-zoom-control" id="zoomControl">
+            <button class="ar-zoom-btn interactive" id="btnZoomOut">−</button>
+            <button class="ar-zoom-btn interactive" id="btnZoomIn">+</button>
+        </div>
+
+        <!-- AR Controls Bar -->
+        <div class="ar-controls-bar" id="controlsBar" style="display: none;">
+            <button class="ar-ctrl-btn interactive" id="btnRotate">
+                🔄 Rotate
+            </button>
+            <button class="ar-ctrl-btn interactive" id="btnSimulate" disabled title="Connect the cable first">
+                ⚠️ Fail Cable
+            </button>
+            <button class="ar-ctrl-btn interactive" id="btnGateway" disabled title="Connect the cable first">
+                🌐 Break Gateway
+            </button>
+            <button class="ar-ctrl-btn interactive" id="btnReset">
+                ↺ Reset
+            </button>
+        </div>
+
+        <!-- Bottom Notification / Inspector Panel -->
+        <div class="ar-bottom-panel interactive" id="bottomPanel">
+            <div class="panel-title">
+                <span id="panelTitle">📱 Markerless Surface AR</span>
+                <span class="badge badge-warning" id="panelBadge">Scanning</span>
+            </div>
+            <div class="panel-desc" id="panelDesc">
+                Move your mobile phone camera slowly towards a flat table or floor to detect a surface reticle circle.
+            </div>
+            <button id="startArButton" class="interactive">▶ Start AR Experience</button>
+            <div id="unsupportedNotice" class="interactive"></div>
+            <button class="btn success interactive" id="placeButton" style="display: none; margin: 10px 0 0 0;">
+                📡 Place Network Equipment Setup
+            </button>
+            <button class="interactive" id="forcePlaceButton" style="display: none;">
+                📍 Place Network Here
+            </button>
+            <div id="actionArea" style="display: none; margin-top: 10px;">
+                <a href="troubleshooting.html" id="diagnosticsLink" class="btn sm success interactive" style="margin: 0; text-decoration: none;">
+                    🛠️ Start Step-by-Step Diagnostics
+                </a>
+            </div>
+        </div>
+    </div>
+
+    <!-- WebXR Scene -->
+    <!-- logarithmicDepthBuffer is deliberately OFF here (unlike marker.html)
+         - it's a known-bad combo with WebXR immersive sessions on Android/
+         ARCore that can silently discard every fragment (nothing renders,
+         no JS error). marker.html can safely use it because AR.js there is
+         a plain non-XR canvas render, not a real immersive-ar session.
+
+         ar-hit-test MUST be a <a-scene>-level component, not applied to an
+         arbitrary <a-entity> - A-Frame throws "Component `ar-hit-test` can
+         only be applied to <a-scene>" and never initializes it otherwise.
+         Its `target` is the reticle it visually drives; our own JS copies
+         the reticle's tracked pose onto #networkGroup at the moment the
+         user actually taps to place. -->
+    <a-scene
+        webxr="requiredFeatures: hit-test; optionalFeatures: local-floor, dom-overlay; overlayElement: #overlay"
+        renderer="colorManagement: true; logarithmicDepthBuffer: false;"
+        ar-hit-test="target: #reticle"
+        vr-mode-ui="enabled: false">
+
+        <a-camera id="camera" position="0 1.6 0"></a-camera>
+
+        <!-- Explicit lights: don't rely on A-Frame's auto-injected default
+             lighting inside an AR session - the router/switch materials are
+             PBR (metal/roughness) and render solid black with no light. -->
+        <a-entity light="type: ambient; color: #ffffff; intensity: 0.8"></a-entity>
+        <a-entity light="type: directional; color: #ffffff; intensity: 0.6" position="0.5 1 1"></a-entity>
+
+        <a-entity cursor="rayOrigin: mouse" raycaster="objects: .clickable-ar"></a-entity>
+
+        <a-assets>
+            <a-asset-item id="routerModel" src="assets/router.glb"></a-asset-item>
+            <a-asset-item id="switchModel" src="assets/switch.glb"></a-asset-item>
+        </a-assets>
+
+        <!-- Reticle - purely visual, driven by the scene-level ar-hit-test
+             component above (target: #reticle). No component of its own. -->
+        <a-entity id="reticle" visible="false">
+            <a-ring rotation="-90 0 0" radius-inner="0.1" radius-outer="0.15" color="#2563eb" material="opacity: 0.8; transparent: true">
+                <a-circle radius="0.03" color="#38bdf8"></a-circle>
+            </a-ring>
+        </a-entity>
+
+        <!-- Network 3D Topology Group -->
+        <a-entity id="networkGroup" visible="false" position="0 0 -1.5">
+
+            <!-- 1. Router Model -->
+            <a-entity
+                class="clickable-ar"
+                id="routerEntity"
+                gltf-model="#routerModel"
+                position="-0.4 0.1 0"
+                scale="0.07 0.07 0.07"
+                data-name="Core Router"
+                data-status="Active Gateway"
+                data-desc="Main network gateway routing traffic between local subnet and Internet ISP modem. LAN IP: 192.168.1.1 | DHCP: Enabled | Network: 192.168.1.0/24">
+            </a-entity>
+
+            <!-- 2. Network Switch Model -->
+            <a-entity
+                class="clickable-ar"
+                id="switchEntity"
+                gltf-model="#switchModel"
+                position="0.4 0 0"
+                scale="0.07 0.07 0.07"
+                data-name="Managed Switch (24-Port)"
+                data-status="Active Link"
+                data-desc="Distributes Ethernet packets across local LAN workstation computers and IP phones. IP: 192.168.1.2 (Management, static).">
+            </a-entity>
+
+            <!-- 3. Interconnecting Ethernet Cable - starts UNPLUGGED, off to
+                 the side. The user has to physically drag it (touch-drag in
+                 AR) onto the gap between the router and switch ports; a
+                 proximity/collision check on release decides whether it
+                 actually connects. Wired up in the script below. -->
+            <a-cylinder
+                class="clickable-ar draggable-ar"
+                id="cableEntity"
+                position="0 -0.05 0.3"
+                radius="0.02"
+                height="0.3"
+                rotation="0 0 0"
+                color="#94a3b8"
+                data-name="Cat6 Patch Cable"
+                data-status="Disconnected 🔴"
+                data-desc="Unplugged Cat6 patch cable. Drag it onto the gap between the Router and Switch ports to establish the physical link.">
+            </a-cylinder>
+
+            <!-- Status Indicator Light on Cable - only shown once the cable
+                 is actually dragged into place and connected. -->
+            <a-sphere
+                id="linkLed"
+                position="0 0.18 0"
+                radius="0.04"
+                color="#10b981"
+                visible="false"
+                animation="property: material.color; type: color; to: #059669; dir: alternate; dur: 800; loop: true;">
+            </a-sphere>
+
+            <!-- 4/5. Two Workstation PCs, primitive-built (no dedicated .glb
+                 model available), branching off the switch: switch -> drop
+                 cable straight down to a junction -> splits left/right to
+                 PC 1 and PC 2. Every cable segment here is either purely
+                 vertical (default cylinder orientation) or purely
+                 horizontal (rotation 0 0 90), same trick as the router<->
+                 switch cable - avoids needing arbitrary diagonal rotation
+                 math for a static decorative topology. Both PCs' downstream
+                 link/IP/status only come alive once the router<->switch
+                 uplink is actually connected - controlled from the script
+                 below. -->
+            <a-entity
+                class="clickable-ar"
+                id="pc1Entity"
+                position="0.78 0.22 0"
+                data-name="PC 1 (Workstation)"
+                data-status="No Link"
+                data-desc="PC 1. IP Address: Not Assigned | Subnet Mask: — | Default Gateway: — | Status: 🔴 No Link (connect the uplink cable to get a DHCP lease)">
+                <a-box class="clickable-ar" width="0.22" height="0.14" depth="0.015" color="#1e293b" position="0 0.13 0">
+                    <a-plane id="pc1Screen" class="clickable-ar" width="0.19" height="0.11" color="#334155" position="0 0 0.009"></a-plane>
+                </a-box>
+                <a-box class="clickable-ar" width="0.02" height="0.06" depth="0.02" color="#475569" position="0 0.03 0"></a-box>
+                <a-box class="clickable-ar" width="0.12" height="0.015" depth="0.08" color="#334155" position="0 0 0"></a-box>
+            </a-entity>
+
+            <a-entity
+                class="clickable-ar"
+                id="pc2Entity"
+                position="0.78 -0.22 0"
+                data-name="PC 2 (Workstation)"
+                data-status="No Link"
+                data-desc="PC 2. IP Address: Not Assigned | Subnet Mask: — | Default Gateway: — | Status: 🔴 No Link (connect the uplink cable to get a DHCP lease)">
+                <a-box class="clickable-ar" width="0.22" height="0.14" depth="0.015" color="#1e293b" position="0 0.13 0">
+                    <a-plane id="pc2Screen" class="clickable-ar" width="0.19" height="0.11" color="#334155" position="0 0 0.009"></a-plane>
+                </a-box>
+                <a-box class="clickable-ar" width="0.02" height="0.06" depth="0.02" color="#475569" position="0 0.03 0"></a-box>
+                <a-box class="clickable-ar" width="0.12" height="0.015" depth="0.08" color="#334155" position="0 0 0"></a-box>
+            </a-entity>
+
+            <!-- Static (not draggable) downstream cables - two diagonals
+                 straight from the switch to each stacked PC (bracket/">"
+                 shape). Position/rotation/height below are precomputed
+                 (midpoint, length, angle-from-vertical) for the exact
+                 switch->pc1 and switch->pc2 vectors - see
+                 scripts/build-pattern-marker.js sibling note: this isn't a
+                 generic solver, just the one-off geometry for these fixed
+                 points. Their color/visibility mirrors whatever state the
+                 real drag-connected uplink cable is in. -->
+            <a-cylinder id="cablePc1Entity" position="0.59 0.11 0" radius="0.015" height="0.4391" rotation="0 0 -59.93" color="#94a3b8" visible="false"></a-cylinder>
+            <a-cylinder id="cablePc2Entity" position="0.59 -0.11 0" radius="0.015" height="0.4391" rotation="0 0 -120.07" color="#94a3b8" visible="false"></a-cylinder>
+
+            <!-- Animated "packet" markers - only running while the whole
+                 chain (uplink cable connected AND not simulating a fault)
+                 is healthy. Toggled on/off in the script, not looping by
+                 default. -->
+            <a-sphere id="packet1" radius="0.02" color="#fbbf24" visible="false"></a-sphere>
+            <a-sphere id="packet2" radius="0.02" color="#fbbf24" visible="false"></a-sphere>
+            <a-sphere id="packet3" radius="0.02" color="#fbbf24" visible="false"></a-sphere>
+
+        </a-entity>
+
+    </a-scene>
+
+    <script>
+        const scene = document.querySelector("a-scene");
+        const reticle = document.querySelector("#reticle");
+        const networkGroup = document.querySelector("#networkGroup");
+
+        const statusDot = document.querySelector("#statusDot");
+        const statusText = document.querySelector("#statusText");
+
+        const panelTitle = document.querySelector("#panelTitle");
+        const panelBadge = document.querySelector("#panelBadge");
+        const panelDesc = document.querySelector("#panelDesc");
+        const placeButton = document.querySelector("#placeButton");
+        const forcePlaceButton = document.querySelector("#forcePlaceButton");
+        const controlsBar = document.querySelector("#controlsBar");
+        const actionArea = document.querySelector("#actionArea");
+        const bottomPanel = document.querySelector("#bottomPanel");
+
+        // .ar-controls-bar uses a hardcoded `bottom: 160px` in style.css,
+        // which assumes #bottomPanel is always short. Its actual height
+        // varies a lot with panelDesc's text length (short scanning hints
+        // vs. the longer cable-connection messages) - once the panel grows
+        // past what that fixed offset assumed, it visually covers the
+        // Rotate/Fail Cable/Reset row underneath it (both are
+        // position:fixed at the same z-index, and the panel paints on top
+        // since it comes later in the DOM). Track the panel's real
+        // rendered height instead of guessing a constant.
+        function syncControlsBarPosition () {
+            controlsBar.style.bottom = (bottomPanel.offsetHeight + 24 + 12) + "px";
+        }
+        new MutationObserver(syncControlsBarPosition).observe(bottomPanel, { childList: true, subtree: true, characterData: true });
+        window.addEventListener("resize", syncControlsBarPosition);
+        syncControlsBarPosition();
+
+        const startArButton = document.querySelector("#startArButton");
+        const unsupportedNotice = document.querySelector("#unsupportedNotice");
+
+        const btnRotate = document.querySelector("#btnRotate");
+        const zoomControl = document.querySelector("#zoomControl");
+        const btnZoomIn = document.querySelector("#btnZoomIn");
+        const btnZoomOut = document.querySelector("#btnZoomOut");
+        const btnSimulate = document.querySelector("#btnSimulate");
+        const btnGateway = document.querySelector("#btnGateway");
+        const btnReset = document.querySelector("#btnReset");
+        const cableEntity = document.querySelector("#cableEntity");
+        const linkLed = document.querySelector("#linkLed");
+        const diagnosticsLink = document.querySelector("#diagnosticsLink");
+        const pc1Entity = document.querySelector("#pc1Entity");
+        const pc1Screen = document.querySelector("#pc1Screen");
+        const pc2Entity = document.querySelector("#pc2Entity");
+        const pc2Screen = document.querySelector("#pc2Screen");
+        const cablePc1Entity = document.querySelector("#cablePc1Entity");
+        const cablePc2Entity = document.querySelector("#cablePc2Entity");
+        const packet1 = document.querySelector("#packet1");
+        const packet2 = document.querySelector("#packet2");
+        const packet3 = document.querySelector("#packet3");
+        const connectSound = document.querySelector("#connectSound");
+
+        // "Start Step-by-Step Diagnostics" used to link to a completely
+        // generic quiz with zero awareness of what actually happened in the
+        // AR scene. Pass the real cable state through as URL params so
+        // troubleshooting.html can ground its first question in what you
+        // actually did in AR, instead of the two features feeling
+        // disconnected from each other.
+        function syncDiagnosticsLink () {
+            diagnosticsLink.href = `troubleshooting.html?cableConnected=${isCableConnected}&faultSimulated=${isSimulatingFailure}`;
+        }
+
+        let isPlaced = false;
+        let isSimulatingFailure = false;
+        let isCableConnected = false;
+        let isGatewayMisconfigured = false;
+        let currentRotation = 0;
+        const ZOOM_STEP = 0.15;
+        const ZOOM_MIN = 0.4;
+        const ZOOM_MAX = 2.2;
+        let currentZoom = 1;
+
+        // We disabled A-Frame's auto-injected "Enter AR" button
+        // (vr-mode-ui="enabled: false") and use our own big, obvious
+        // button instead, because the tiny default corner icon is easy to
+        // miss on a phone - and this lets us catch and *show* the actual
+        // error if the browser refuses the AR session (unsupported device,
+        // no ARCore, camera permission denied, non-HTTPS, etc.) instead of
+        // the page just sitting there silently on "Scanning...".
+        function checkArSupport () {
+            if (!navigator.xr || !navigator.xr.isSessionSupported) {
+                showUnsupported("WebXR isn't available in this browser. On Android, open this page in Chrome (not an in-app browser like Facebook/Instagram).");
+                return;
+            }
+            navigator.xr.isSessionSupported("immersive-ar").then((supported) => {
+                if (!supported) {
+                    showUnsupported("This device/browser doesn't support WebXR AR (immersive-ar). Markerless AR needs Chrome on an Android phone with ARCore (e.g. Samsung S21+). iPhone/Safari isn't supported yet.");
+                }
+            }).catch(() => {
+                showUnsupported("Couldn't check WebXR AR support on this device.");
+            });
+        }
+
+        function showUnsupported (message) {
+            startArButton.disabled = true;
+            startArButton.innerText = "AR Not Available";
+            unsupportedNotice.style.display = "block";
+            unsupportedNotice.innerText = "⚠️ " + message;
+        }
+
+        startArButton.addEventListener("click", () => {
+            startArButton.disabled = true;
+            startArButton.innerText = "Starting AR...";
+            scene.enterVR(true).catch((err) => {
+                console.error("Failed to enter AR:", err);
+                startArButton.disabled = false;
+                startArButton.innerText = "▶ Start AR Experience";
+                unsupportedNotice.style.display = "block";
+                unsupportedNotice.innerText = "⚠️ Couldn't start AR: " + (err && err.message ? err.message : err) + ". Make sure you allowed camera access and are on Chrome for Android over HTTPS.";
+            });
+        });
+
+        checkArSupport();
+
+        // gltf-model fails silently by default - if router.glb/switch.glb
+        // fail to parse or fetch, the model just never appears. Surface it
+        // instead of leaving the panel looking like placement did nothing.
+        function reportModelError (label) {
+            return (evt) => {
+                console.error(`${label} failed to load:`, evt.detail);
+                statusDot.className = "dot-indicator danger";
+                statusText.innerText = "Model Load Failed";
+                panelTitle.innerText = "⚠️ " + label + " Failed to Load";
+                panelBadge.innerText = "Error";
+                panelBadge.className = "badge badge-danger";
+                panelDesc.innerText = (evt.detail && evt.detail.src ? evt.detail.src + ": " : "") +
+                    ((evt.detail && evt.detail.error && evt.detail.error.message) || "Unknown error - check browser console.");
+            };
+        }
+        document.querySelector("#routerEntity").addEventListener("model-error", reportModelError("Router model"));
+        document.querySelector("#switchEntity").addEventListener("model-error", reportModelError("Switch model"));
+
+        // router.glb / switch.glb were not authored at 1-unit-per-meter, so
+        // a hardcoded scale is just a guess at whatever conversion factor
+        // these particular exports need. Measure each model's real loaded
+        // bounding box on model-loaded and rescale it to a sane real-world
+        // target size on the spot - self-correcting regardless of source units.
+        function autoFitModel (entity, label, targetMeters) {
+            entity.addEventListener("model-loaded", (evt) => {
+                const root = evt.detail.model;
+                const box = new THREE.Box3().setFromObject(root);
+                const size = box.getSize(new THREE.Vector3());
+                const maxDim = Math.max(size.x, size.y, size.z);
+                if (!isFinite(maxDim) || maxDim <= 0) return;
+                entity.object3D.scale.multiplyScalar(targetMeters / maxDim);
+                // These exports carry unusually large raw vertex coordinates
+                // - disable frustum culling per-mesh so an off bounding-
+                // sphere estimate can never cause the renderer to silently
+                // skip drawing them.
+                root.traverse((obj) => { if (obj.isMesh) obj.frustumCulled = false; });
+            });
+        }
+        autoFitModel(document.querySelector("#routerEntity"), "Router", 0.3);
+        autoFitModel(document.querySelector("#switchEntity"), "Switch", 0.44);
+
+        // If the hit-test genuinely never finds a surface within a few
+        // seconds, most of the time it's not a code bug - it's ARCore/
+        // ARKit's underlying plane detection struggling with the physical
+        // surface itself (a plain single-colour or repeating-pattern desk
+        // gives it nothing distinguishable to track, same for glossy/
+        // reflective surfaces or dim/glary lighting), or the phone being
+        // held too still (it needs a bit of motion to triangulate depth).
+        // Surface up a concrete, actionable hint instead of leaving the
+        // panel stuck on a generic "Scanning..." forever.
+        let noSurfaceTimeout = null;
+        function armNoSurfaceHint () {
+            clearTimeout(noSurfaceTimeout);
+            forcePlaceButton.style.display = "none";
+            noSurfaceTimeout = setTimeout(() => {
+                if (isPlaced) return;
+                panelDesc.innerText = "Ready to place your virtual network setup in front of you. Tap below to position it, or keep scanning for automatic surface placement.";
+                forcePlaceButton.style.display = "block";
+            }, 10000);
+        }
+
+        // Stop the scene-level ar-hit-test component from continuing to
+        // drive #reticle's position/rotation to the latest hit-test result
+        // every frame once placement is locked in.
+        function freezePlacement () {
+            scene.removeAttribute("ar-hit-test");
+            reticle.setAttribute("visible", "false");
+        }
+
+        scene.addEventListener("enter-vr", () => {
+            if (!scene.is("ar-mode")) return; // ignore plain desktop/inspector VR entry
+            startArButton.style.display = "none";
+            statusText.innerText = "WebXR Surface Scanning...";
+            panelDesc.innerText = "Point your camera at a surface (table/floor) until the target reticle appears.";
+            armNoSurfaceHint();
+        });
+
+        scene.addEventListener("exit-vr", () => {
+            clearTimeout(noSurfaceTimeout);
+            forcePlaceButton.style.display = "none";
+            startArButton.style.display = "block";
+            startArButton.disabled = false;
+            startArButton.innerText = "▶ Start AR Experience";
+            statusText.innerText = "AR Session Ended";
+            panelBadge.innerText = "Ended";
+            panelBadge.className = "badge badge-warning";
+        });
+
+        // Surface Detection via Hit-Test. Fires on the SCENE, not the
+        // reticle - ar-hit-test is a scene-level component, and A-Frame
+        // components emit their events on the entity they're attached to.
+        // (ar-hit-test-start only means "scanning began" - the reticle is
+        // actually positioned on a real surface when ar-hit-test-achieved
+        // fires, so that's the correct event to switch the UI to "Ready".)
+        scene.addEventListener("ar-hit-test-achieved", () => {
+            if (!isPlaced) {
+                clearTimeout(noSurfaceTimeout);
+                forcePlaceButton.style.display = "none";
+                statusDot.className = "dot-indicator";
+                statusText.innerText = "Surface Detected!";
+                panelTitle.innerText = "⭕ Surface Found";
+                panelBadge.innerText = "Ready to Place";
+                panelBadge.className = "badge badge-active";
+                panelDesc.innerText = "Flat surface locked. Tap 'Place Network Equipment' to project 3D hardware onto your table.";
+                placeButton.style.display = "block";
+            }
+        });
+
+        // Shared "finish placing" logic for both the real hit-test button
+        // and the manual fallback button below.
+        //
+        // IMPORTANT: this does NOT reveal the new tappable elements
+        // (controlsBar buttons, the "Start Step-by-Step Diagnostics" link)
+        // in the same instant as the tap that triggered it. On some phones,
+        // a single tap on a WebXR dom-overlay button can deliver a second
+        // "ghost" click event a couple hundred ms after the real one. If a
+        // brand-new link has by then reflowed into the exact screen
+        // position the finger just tapped (because the button it tapped
+        // just got display:none'd and everything below shifted up), that
+        // ghost click lands on the NEW element instead - which is exactly
+        // how tapping "Place Here Anyway" was jumping straight to
+        // troubleshooting.html without the model ever appearing on screen.
+        // Keeping the tapped buttons in place (just dimmed + inert) during
+        // a short guard window, and only swapping in the new elements
+        // after it, means there's nothing live at that spot for a ghost
+        // click to hit.
+        let placementLocked = false;
+        function completePlacement (usedFallback) {
+            if (placementLocked) return;
+            placementLocked = true;
+            clearTimeout(noSurfaceTimeout);
+            freezePlacement();
+            networkGroup.setAttribute("visible", "true");
+            isPlaced = true;
+
+            placeButton.style.pointerEvents = "none";
+            forcePlaceButton.style.pointerEvents = "none";
+            placeButton.style.opacity = "0.5";
+            forcePlaceButton.style.opacity = "0.5";
+
+            statusText.innerText = "AR Network Placed";
+            panelTitle.innerText = "📡 3D Network Topology";
+            panelBadge.innerText = usedFallback ? "Online (manual placement)" : "Online";
+            panelBadge.className = "badge badge-active";
+            panelDesc.innerText = "Equipment placed! The Cat6 cable is unplugged (gray, off to the side) - press and drag it onto the gap between the Router and Switch to physically connect the link.";
+
+            syncDiagnosticsLink();
+            setTimeout(() => {
+                placeButton.style.display = "none";
+                forcePlaceButton.style.display = "none";
+                controlsBar.style.display = "flex";
+                actionArea.style.display = "block";
+                zoomControl.style.display = "flex";
+            }, 450);
+        }
+
+        // Place Equipment Button (real hit-test surface was found).
+        // The scene-level ar-hit-test component only drives #reticle's
+        // pose (that's its `target`) - it doesn't know about
+        // #networkGroup, so we copy the reticle's current tracked
+        // position/rotation onto the actual content ourselves at the
+        // moment the user commits to it.
+        placeButton.addEventListener("click", (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            networkGroup.object3D.position.copy(reticle.object3D.position);
+            networkGroup.object3D.rotation.copy(reticle.object3D.rotation);
+            completePlacement(false);
+        });
+
+        // Place Anyway Button (fallback - no real surface found yet).
+        // Plants the network group a fixed distance in front of wherever
+        // the camera is currently looking, at a fixed height below the
+        // camera. Forward is flattened to horizontal-only before use -
+        // using the raw forward vector (which dips down/up with however
+        // much you're tilting the phone to aim at a table) AND ALSO
+        // subtracting a fixed height offset double-counts the tilt, and can
+        // land the model near real floor height, off the bottom of the
+        // screen behind the UI panel.
+        forcePlaceButton.addEventListener("click", (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            const cameraEl = document.querySelector("#camera");
+            const forward = new THREE.Vector3(0, 0, -1);
+            forward.applyQuaternion(cameraEl.object3D.quaternion);
+            forward.y = 0;
+            forward.normalize();
+            networkGroup.object3D.position.copy(cameraEl.object3D.position).add(forward);
+            networkGroup.object3D.position.y = cameraEl.object3D.position.y - 0.35;
+            const camRotationY = cameraEl.getAttribute("rotation").y;
+            networkGroup.setAttribute("rotation", `0 ${camRotationY} 0`);
+
+            completePlacement(true);
+        });
+
+        // Rotate Button
+        btnRotate.addEventListener("click", () => {
+            if (!isPlaced) return;
+            currentRotation += 45;
+            networkGroup.setAttribute("rotation", `0 ${currentRotation} 0`);
+        });
+
+        // Zoom [+] / [-] Buttons
+        function applyZoom (delta) {
+            if (!isPlaced) return;
+            currentZoom = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, currentZoom + delta));
+            networkGroup.object3D.scale.setScalar(currentZoom);
+        }
+        btnZoomIn.addEventListener("click", () => applyZoom(ZOOM_STEP));
+        btnZoomOut.addEventListener("click", () => applyZoom(-ZOOM_STEP));
+
+        // Simulate Cable Failure Button - locked out until the cable has
+        // actually been dragged into a live connection (see drag-and-drop
+        // logic below); disabled/greyed out in the HTML until then.
+        btnSimulate.addEventListener("click", () => {
+            if (!isPlaced || !isCableConnected) return;
+            isSimulatingFailure = !isSimulatingFailure;
+
+            if (isSimulatingFailure) {
+                cableEntity.setAttribute("color", "#ef4444");
+                linkLed.setAttribute("color", "#ef4444");
+                btnSimulate.innerHTML = "🛠️ Fix Cable Link";
+                btnSimulate.style.background = "#10b981";
+
+                statusDot.className = "dot-indicator danger";
+                statusText.innerText = "Network Fault!";
+                panelTitle.innerText = "⚠️ Connection Interrupted";
+                panelBadge.innerText = "Link Down";
+                panelBadge.className = "badge badge-danger";
+                panelDesc.innerText = "Simulated Problem: Ethernet patch cable disconnected or damaged! Packet transfer between Switch and Router halted.";
+            } else {
+                cableEntity.setAttribute("color", "#10b981");
+                linkLed.setAttribute("color", "#10b981");
+                btnSimulate.innerHTML = "⚠️ Fail Cable";
+                btnSimulate.style.background = "rgba(30, 41, 59, 0.9)";
+
+                statusDot.className = "dot-indicator";
+                statusText.innerText = "Network Link Restored";
+                panelTitle.innerText = "✓ Link Operational";
+                panelBadge.innerText = "Gigabit Active";
+                panelBadge.className = "badge badge-active";
+                panelDesc.innerText = "Ethernet connection restored! Signal passing cleanly between Router and Switch.";
+            }
+            updateDownstreamVisuals();
+            syncDiagnosticsLink();
+        });
+
+        // Simulate Gateway Misconfiguration Button - a separate, IP/routing
+        // -layer (L3) fault distinct from a physically dead cable (L1/L2).
+        // Also locked out until the cable is connected - can't diagnose IP
+        // config on a PC with no physical link in the first place.
+        btnGateway.addEventListener("click", () => {
+            if (!isPlaced || !isCableConnected) return;
+            isGatewayMisconfigured = !isGatewayMisconfigured;
+
+            if (isGatewayMisconfigured) {
+                btnGateway.innerHTML = "🔧 Fix Gateway";
+                btnGateway.style.background = "#10b981";
+
+                statusDot.className = "dot-indicator danger";
+                statusText.innerText = "IP Config Fault!";
+                panelTitle.innerText = "⚠️ Gateway Misconfigured";
+                panelBadge.innerText = "No Internet";
+                panelBadge.className = "badge badge-danger";
+                panelDesc.innerText = "Simulated Problem: PC's Default Gateway (192.168.1.50) doesn't match the Router's LAN IP (192.168.1.1). Local link is fine, but the PC has no route to the Router or Internet. Tap the PC to inspect its IP config.";
+            } else {
+                btnGateway.innerHTML = "🌐 Break Gateway";
+                btnGateway.style.background = "rgba(30, 41, 59, 0.9)";
+
+                statusDot.className = "dot-indicator";
+                statusText.innerText = "Gateway Fixed";
+                panelTitle.innerText = "✓ Routing Restored";
+                panelBadge.innerText = "Online";
+                panelBadge.className = "badge badge-active";
+                panelDesc.innerText = "PC's Default Gateway corrected to 192.168.1.1. Full connectivity to the Router and Internet restored.";
+            }
+            updateDownstreamVisuals();
+        });
+
+        // Reset Placement Button
+        btnReset.addEventListener("click", () => {
+            networkGroup.setAttribute("visible", "false");
+            isPlaced = false;
+            placementLocked = false;
+            controlsBar.style.display = "none";
+            actionArea.style.display = "none";
+            zoomControl.style.display = "none";
+            placeButton.style.display = "none";
+            forcePlaceButton.style.display = "none";
+            placeButton.style.pointerEvents = "";
+            forcePlaceButton.style.pointerEvents = "";
+            placeButton.style.opacity = "";
+            forcePlaceButton.style.opacity = "";
+
+            // Re-enable live hit-test tracking (freezePlacement removed it
+            // from the scene) so a fresh surface scan can drive the reticle
+            // again.
+            scene.setAttribute("ar-hit-test", "target: #reticle");
+            reticle.setAttribute("visible", "false");
+
+            resetCableState();
+
+            statusDot.className = "dot-indicator warning";
+            statusText.innerText = "Detecting Surface...";
+            panelTitle.innerText = "📱 Markerless AR";
+            panelBadge.innerText = "Reset";
+            panelBadge.className = "badge badge-warning";
+            panelDesc.innerText = "Placement reset. Scan a surface again to relocate your virtual network equipment.";
+            armNoSurfaceHint();
+        });
+
+        // Clickable 3D Item Inspection. #pc1Entity/#pc2Entity are each built
+        // from nested child primitives (monitor/neck/base boxes) for the
+        // raycaster to actually hit, rather than one flat GLTF mesh like
+        // router/switch - a tap can resolve to whichever CHILD box was
+        // physically touched, not necessarily the PC entity itself, so its
+        // data-name/status/desc attributes would never be found by reading
+        // straight off the clicked element. el.closest("[data-name]") walks
+        // up to whichever ancestor actually carries the inspect data,
+        // regardless of which specific sub-part got hit.
+        const clickables = document.querySelectorAll(".clickable-ar");
+        clickables.forEach(el => {
+            el.addEventListener("click", () => {
+                const target = el.closest("[data-name]");
+                if (!target) return;
+                const name = target.getAttribute("data-name");
+                const status = target.getAttribute("data-status");
+                const desc = target.getAttribute("data-desc");
+
+                panelTitle.innerText = "🔍 " + name;
+                panelBadge.innerText = status;
+                panelBadge.className = (isSimulatingFailure || isGatewayMisconfigured) && (name.includes("Cable") || name.includes("PC")) ? "badge badge-danger" : "badge badge-active";
+                panelDesc.innerText = desc;
+            });
+        });
+
+        // ---------------------------------------------------------------
+        // Drag-and-drop cable connection with proximity/collision check.
+        // The cable starts unplugged off to the side (see #cableEntity's
+        // starting position/color/data-* in the HTML). The user has to
+        // press-and-drag it onto the gap between the router and switch;
+        // on release, a distance check against the ideal connect point
+        // decides whether it actually snaps into a live link. Diagnostics
+        // (Fail Cable) stay locked out until that happens - this is the
+        // assignment's "Advanced Implementation" requirement: real
+        // drag-and-drop manipulation plus collision detection driving
+        // multi-step connection state (disconnected -> dragging ->
+        // connected -> healthy/faulted).
+        //
+        // Implemented with raw touch/mouse + THREE.Raycaster rather than
+        // A-Frame's cursor/raycaster component, because that component is
+        // wired for click/hover, not continuous drag tracking, and we need
+        // this to work identically inside a live WebXR dom-overlay session
+        // and in a plain desktop browser for testing.
+        const CONNECT_LOCAL_POS = new THREE.Vector3(0, 0.1, 0);
+        const DISCONNECT_LOCAL_POS = new THREE.Vector3(0, -0.05, 0.3);
+        const CONNECT_THRESHOLD_M = 0.18;
+
+        const dragRaycaster = new THREE.Raycaster();
+        let isDraggingCable = false;
+
+        function getNDC (clientX, clientY) {
+            const rect = scene.canvas.getBoundingClientRect();
+            return new THREE.Vector2(
+                ((clientX - rect.left) / rect.width) * 2 - 1,
+                -((clientY - rect.top) / rect.height) * 2 + 1
+            );
+        }
+
+        function tryStartCableDrag (clientX, clientY) {
+            if (!isPlaced || isCableConnected || !scene.canvas || !scene.camera) return false;
+            dragRaycaster.setFromCamera(getNDC(clientX, clientY), scene.camera);
+            const hits = dragRaycaster.intersectObject(cableEntity.object3D, true);
+            if (hits.length === 0) return false;
+            isDraggingCable = true;
+            panelTitle.innerText = "🖐️ Dragging Cable";
+            panelDesc.innerText = "Drag it onto the gap between the Router and Switch, then release.";
+            return true;
+        }
+
+        function updateCableDrag (clientX, clientY) {
+            if (!scene.camera) return;
+            dragRaycaster.setFromCamera(getNDC(clientX, clientY), scene.camera);
+            // Intersect a horizontal plane at the ideal connect point's
+            // world-space height, so the cable drags smoothly along "table
+            // level" no matter which way the group is rotated (rotation is
+            // Y-axis only, so world "up" is unaffected).
+            const planeWorldPoint = CONNECT_LOCAL_POS.clone();
+            networkGroup.object3D.localToWorld(planeWorldPoint);
+            const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -planeWorldPoint.y);
+            const hitPoint = new THREE.Vector3();
+            if (!dragRaycaster.ray.intersectPlane(plane, hitPoint)) return;
+            networkGroup.object3D.worldToLocal(hitPoint);
+            cableEntity.object3D.position.copy(hitPoint);
+        }
+
+        function endCableDrag () {
+            if (!isDraggingCable) return;
+            isDraggingCable = false;
+            const dist = cableEntity.object3D.position.distanceTo(CONNECT_LOCAL_POS);
+            if (dist <= CONNECT_THRESHOLD_M) {
+                connectCable();
+            } else {
+                statusDot.className = "dot-indicator warning";
+                panelTitle.innerText = "🔌 Not Connected Yet";
+                panelBadge.innerText = "Try Again";
+                panelBadge.className = "badge badge-warning";
+                panelDesc.innerText = "Not close enough to the ports. Drag the cable fully into the gap between the Router and Switch.";
+            }
+        }
+
+        // Downstream visuals (switch<->PC cable, PC status/IP, animated
+        // packet markers) are a function of two INDEPENDENT fault types,
+        // deliberately modeling two different network layers:
+        //   - isSimulatingFailure: physical layer (L1/L2) - cable is
+        //     unplugged/damaged, so NOTHING moves past the switch at all.
+        //   - isGatewayMisconfigured: IP/routing layer (L3) - the physical
+        //     link is completely fine (packets still visibly flow router<->
+        //     switch<->PC), but the PC's default gateway doesn't match the
+        //     router's LAN IP, so it has local connectivity but no route
+        //     out - "link up, no internet", a genuinely common real-world
+        //     fault distinct from a dead cable.
+        function startPacketAnimation (entity, fromPos, toPos, duration) {
+            entity.setAttribute("visible", "true");
+            entity.setAttribute("animation", `property: position; from: ${fromPos}; to: ${toPos}; dur: ${duration}; loop: true; easing: linear`);
+        }
+        function stopPacketAnimation (entity) {
+            entity.removeAttribute("animation");
+            entity.setAttribute("visible", "false");
+        }
+        // Both PCs branch off the same switch uplink, so they always share
+        // identical health - only their own IP differs. One small helper
+        // avoids duplicating the four-state status/desc text twice.
+        function updatePcVisual (entity, screenEl, ip, linkUp, fullyHealthy) {
+            if (fullyHealthy) {
+                screenEl.setAttribute("color", "#38bdf8");
+                entity.setAttribute("data-status", "Online 🟢");
+                entity.setAttribute("data-desc", `${entity.getAttribute("data-name")}. IP Address: ${ip} | Subnet Mask: 255.255.255.0 | Default Gateway: 192.168.1.1 ✓ | Status: 🟢 Connected, DHCP Assigned`);
+            } else if (linkUp) {
+                // linkUp && !fullyHealthy only happens via isGatewayMisconfigured.
+                screenEl.setAttribute("color", "#f59e0b");
+                entity.setAttribute("data-status", "No Internet ⚠️");
+                entity.setAttribute("data-desc", `${entity.getAttribute("data-name")}. IP Address: ${ip} | Subnet Mask: 255.255.255.0 | Default Gateway: 192.168.1.50 ❌ (should be 192.168.1.1) | Status: ⚠️ Local link OK, no route to Router/Internet`);
+            } else {
+                screenEl.setAttribute("color", "#334155");
+                entity.setAttribute("data-status", isCableConnected ? "No Link 🔴" : "No Link");
+                entity.setAttribute("data-desc", isCableConnected
+                    ? `${entity.getAttribute("data-name")}. IP Address: Lost | Subnet Mask: — | Default Gateway: — | Status: 🔴 No Link (upstream Router<->Switch cable is down)`
+                    : `${entity.getAttribute("data-name")}. IP Address: Not Assigned | Subnet Mask: — | Default Gateway: — | Status: 🔴 No Link (connect the uplink cable to get a DHCP lease)`);
+            }
+        }
+
+        function updateDownstreamVisuals () {
+            const linkUp = isCableConnected && !isSimulatingFailure;
+            const fullyHealthy = linkUp && !isGatewayMisconfigured;
+
+            [cablePc1Entity, cablePc2Entity].forEach((cable) => {
+                cable.setAttribute("visible", isCableConnected ? "true" : "false");
+                cable.setAttribute("color", linkUp ? "#10b981" : "#ef4444");
+            });
+
+            if (linkUp) {
+                startPacketAnimation(packet1, "-0.4 0.1 0", "0.4 0 0", 1200);
+                startPacketAnimation(packet2, "0.4 0 0", "0.78 0.22 0", 900);
+                startPacketAnimation(packet3, "0.4 0 0", "0.78 -0.22 0", 900);
+            } else {
+                stopPacketAnimation(packet1);
+                stopPacketAnimation(packet2);
+                stopPacketAnimation(packet3);
+            }
+
+            updatePcVisual(pc1Entity, pc1Screen, "192.168.1.10", linkUp, fullyHealthy);
+            updatePcVisual(pc2Entity, pc2Screen, "192.168.1.11", linkUp, fullyHealthy);
+        }
+
+        function connectCable () {
+            cableEntity.object3D.position.copy(CONNECT_LOCAL_POS);
+            cableEntity.object3D.rotation.set(0, 0, Math.PI / 2);
+            cableEntity.setAttribute("color", "#10b981");
+            cableEntity.setAttribute("data-status", "Link Green 🟢");
+            cableEntity.setAttribute("data-desc", "High-speed Ethernet cable connecting Router LAN port 1 to Switch Uplink port. Tap Fail Cable to simulate a link failure.");
+            linkLed.setAttribute("visible", "true");
+            isCableConnected = true;
+            connectSound.currentTime = 0;
+            connectSound.play().catch(() => {}); // ignore - autoplay can be blocked on some browsers even after a user gesture
+            btnSimulate.removeAttribute("disabled");
+            btnGateway.removeAttribute("disabled");
+            updateDownstreamVisuals();
+
+            statusDot.className = "dot-indicator";
+            statusText.innerText = "Link Established!";
+            panelTitle.innerText = "✅ Cable Connected";
+            panelBadge.innerText = "Gigabit Active";
+            panelBadge.className = "badge badge-active";
+            panelDesc.innerText = "Physical link established between Router and Switch. Diagnostics unlocked - tap 'Fail Cable' to simulate a connectivity issue.";
+            syncDiagnosticsLink();
+        }
+
+        function resetCableState () {
+            isDraggingCable = false;
+            isCableConnected = false;
+            isSimulatingFailure = false;
+            isGatewayMisconfigured = false;
+            cableEntity.object3D.position.copy(DISCONNECT_LOCAL_POS);
+            cableEntity.object3D.rotation.set(0, 0, 0);
+            cableEntity.setAttribute("color", "#94a3b8");
+            cableEntity.setAttribute("data-status", "Disconnected 🔴");
+            cableEntity.setAttribute("data-desc", "Unplugged Cat6 patch cable. Drag it onto the gap between the Router and Switch ports to establish the physical link.");
+            linkLed.setAttribute("visible", "false");
+            btnSimulate.setAttribute("disabled", "");
+            btnSimulate.innerHTML = "⚠️ Fail Cable";
+            btnSimulate.style.background = "rgba(30, 41, 59, 0.9)";
+            btnGateway.setAttribute("disabled", "");
+            btnGateway.innerHTML = "🌐 Break Gateway";
+            btnGateway.style.background = "rgba(30, 41, 59, 0.9)";
+            updateDownstreamVisuals();
+            syncDiagnosticsLink();
+        }
+
+        // Tap-to-inspect via the same manual raycaster used for cable
+        // dragging, instead of relying on A-Frame's cursor/raycaster
+        // component (which is driven by mouse events - inside a live
+        // WebXR dom-overlay session, touches don't reliably get
+        // synthesized into mouse events the way they do on a normal mobile
+        // page, so router/switch/PC taps were silently going nowhere).
+        // The .clickable-ar click listeners further down are left in place
+        // as a harmless fallback for desktop/non-XR testing where mouse
+        // events genuinely do fire.
+        const TAP_MOVE_THRESHOLD_PX = 12;
+        const TAP_MAX_DURATION_MS = 400;
+
+        function handleTapInspect (clientX, clientY) {
+            if (!isPlaced || !scene.camera) return;
+            dragRaycaster.setFromCamera(getNDC(clientX, clientY), scene.camera);
+            const objects = Array.from(document.querySelectorAll(".clickable-ar")).map(el => el.object3D);
+            const hits = dragRaycaster.intersectObjects(objects, true);
+            if (hits.length === 0) return;
+            // Walk up from whichever mesh was actually hit to the nearest
+            // ancestor object3D that has an A-Frame element reference,
+            // matching how .closest("[data-name]") resolves things below.
+            let obj = hits[0].object;
+            while (obj && !obj.el) obj = obj.parent;
+            const target = obj && obj.el && obj.el.closest("[data-name]");
+            if (!target) return;
+            const name = target.getAttribute("data-name");
+            const status = target.getAttribute("data-status");
+            const desc = target.getAttribute("data-desc");
+            panelTitle.innerText = "🔍 " + name;
+            panelBadge.innerText = status;
+            panelBadge.className = (isSimulatingFailure || isGatewayMisconfigured) && (name.includes("Cable") || name.includes("PC")) ? "badge badge-danger" : "badge badge-active";
+            panelDesc.innerText = desc;
+        }
+
+        let touchStartX = 0, touchStartY = 0, touchStartTime = 0;
+
+        document.addEventListener("touchstart", (e) => {
+            const t = e.touches[0];
+            if (!t) return;
+            touchStartX = t.clientX;
+            touchStartY = t.clientY;
+            touchStartTime = Date.now();
+            if (tryStartCableDrag(t.clientX, t.clientY)) e.preventDefault();
+        }, { passive: false });
+        document.addEventListener("touchmove", (e) => {
+            if (!isDraggingCable) return;
+            const t = e.touches[0];
+            if (t) { e.preventDefault(); updateCableDrag(t.clientX, t.clientY); }
+        }, { passive: false });
+        document.addEventListener("touchend", (e) => {
+            if (isDraggingCable) { endCableDrag(); return; }
+            const t = e.changedTouches[0];
+            if (!t) return;
+            const dx = t.clientX - touchStartX;
+            const dy = t.clientY - touchStartY;
+            if (Math.hypot(dx, dy) < TAP_MOVE_THRESHOLD_PX && (Date.now() - touchStartTime) < TAP_MAX_DURATION_MS) {
+                handleTapInspect(t.clientX, t.clientY);
+            }
+        }, { passive: true });
+
+        // Mouse equivalents, for testing in a desktop browser.
+        let mouseDownX = 0, mouseDownY = 0, mouseDownTime = 0;
+        document.addEventListener("mousedown", (e) => {
+            mouseDownX = e.clientX;
+            mouseDownY = e.clientY;
+            mouseDownTime = Date.now();
+            tryStartCableDrag(e.clientX, e.clientY);
+        });
+        document.addEventListener("mousemove", (e) => { if (isDraggingCable) updateCableDrag(e.clientX, e.clientY); });
+        document.addEventListener("mouseup", (e) => {
+            if (isDraggingCable) { endCableDrag(); return; }
+            const dx = e.clientX - mouseDownX;
+            const dy = e.clientY - mouseDownY;
+            if (Math.hypot(dx, dy) < TAP_MOVE_THRESHOLD_PX && (Date.now() - mouseDownTime) < TAP_MAX_DURATION_MS) {
+                handleTapInspect(e.clientX, e.clientY);
+            }
+        });
+    </script>
+
+</body>
+</html>

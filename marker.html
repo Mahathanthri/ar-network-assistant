@@ -1,0 +1,365 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>Marker AR - AR Network Assistant</title>
+
+    <!-- A-Frame (pinned to the version AR.js 3.4.7 is built/tested against -
+         mixing "master" AR.js with an older A-Frame is a common source of
+         broken camera rendering) -->
+    <script src="https://aframe.io/releases/1.6.0/aframe.min.js"></script>
+    <!-- AR.js for A-Frame - pinned release, not master (master is a moving
+         target and the official AR.js docs recommend pinning) -->
+    <script src="https://raw.githack.com/AR-js-org/AR.js/3.4.7/aframe/build/aframe-ar.js"></script>
+
+    <link rel="stylesheet" href="css/style.css">
+    <style>
+        html, body {
+            margin: 0;
+            overflow: hidden;
+            width: 100%;
+            height: 100%;
+            /* Prevent the page from pinch/double-tap zooming when the user
+               is trying to tap a hotspot - but note this must NOT resize
+               the AR.js video/canvas ourselves (see note below). */
+            touch-action: none;
+            -ms-touch-action: none;
+            /* Stop the long-press "Copy / Share / Select all" callout from
+               popping up over the overlay text when someone taps-and-holds
+               near a hotspot - that popup was swallowing taps meant for the
+               3D scene. */
+            -webkit-touch-callout: none;
+            -webkit-user-select: none;
+            user-select: none;
+        }
+        .hotspot-label {
+            font-size: 12px;
+            font-weight: bold;
+            color: #38bdf8;
+        }
+        /* IMPORTANT: don't force width/height/object-fit on #arjs-video or
+           .a-canvas here. AR.js positions/scales the video and the WebGL
+           canvas together with its own transform so that raycasting (tap-
+           to-select on the 3D hotspots) lines up with what's on screen.
+           Overriding their box size with CSS decouples the two and causes
+           a black gutter on one edge *and* taps landing on the wrong 3D
+           position - use the arjs sourceWidth/sourceHeight/displayWidth/
+           displayHeight settings on the <a-scene> below instead. */
+    </style>
+</head>
+<body>
+
+    <!-- Header Overlay -->
+    <div class="ar-header">
+        <a href="index.html" class="back-btn">← Home</a>
+        <div class="ar-status-badge">
+            <div class="dot-indicator" id="statusDot"></div>
+            <span id="statusText">Scanning for Network Marker...</span>
+        </div>
+    </div>
+
+    <!-- Bottom Inspector Overlay Panel -->
+    <div class="ar-bottom-panel" id="inspectorPanel">
+        <div class="panel-title">
+            <span id="compTitle">📷 Point at Network Marker</span>
+            <span class="badge badge-active" id="compBadge">Ready</span>
+        </div>
+        <div class="panel-desc" id="compDesc">
+            Align your camera with the printed router-icon marker (assets/network-marker-printable.png) to render the 3D Router hardware model and interact with ports & indicators.
+        </div>
+        <div id="compActions" style="display: none; margin-top: 10px;">
+            <a href="troubleshooting.html" class="btn sm success" style="margin: 0; text-decoration: none;">
+                🛠️ Troubleshoot This Component
+            </a>
+        </div>
+    </div>
+
+    <!-- AR Scene -->
+    <a-scene
+        embedded
+        vr-mode-ui="enabled: false"
+        renderer="logarithmicDepthBuffer: true; colorManagement: true;"
+        arjs="sourceType: webcam; debugUIEnabled: false; detectionMode: mono_and_matrix; matrixCodeType: 3x3; sourceWidth: 1280; sourceHeight: 960; displayWidth: 1280; displayHeight: 960;">
+
+        <a-entity cursor="rayOrigin: mouse" raycaster="objects: .clickable"></a-entity>
+
+        <a-assets>
+            <a-asset-item id="routerModel" src="assets/router.glb"></a-asset-item>
+        </a-assets>
+
+        <a-marker
+            type="pattern"
+            url="assets/network-marker.patt"
+            id="networkMarker"
+            emitevents="true"
+            smooth="true"
+            smoothCount="10"
+            smoothTolerance="0.01"
+            smoothThreshold="5">
+
+            <!-- Everything below is wrapped in one rotatable group so the
+                 router model AND its hotspot markers turn together (drag
+                 to rotate, handled in the script below) instead of the
+                 hotspots staying fixed while the model spins under them.
+                 Starts tilted 25deg so you see a 3/4 front angle (with the
+                 ports facing you) by default, instead of a flat top-down
+                 view - drag up/down/left/right from there for a full
+                 360 view without needing to physically crouch by the
+                 marker. -->
+            <a-entity id="routerGroup" rotation="25 0 0">
+
+                <!-- Router 3D Model -->
+                <a-entity
+                    id="routerEntity"
+                    gltf-model="#routerModel"
+                    position="0 0.2 0"
+                    scale="0.08 0.08 0.08"
+                    rotation="0 0 0">
+                </a-entity>
+
+                <!-- Hotspot 1: Power Indicator -->
+                <a-sphere
+                    class="clickable"
+                    position="-0.6 0.4 0.4"
+                    radius="0.12"
+                    color="#10b981"
+                    animation="property: scale; dir: alternate; dur: 1000; to: 1.2 1.2 1.2; loop: true;"
+                    data-name="Power LED & Supply"
+                    data-status="Active (12V DC)"
+                    data-desc="Supplies power to internal router hardware. Off or blinking red indicates power supply failure or bad adapter.">
+                    <a-text value="POWER" align="center" position="0 0.2 0" scale="0.5 0.5 0.5" color="#ffffff"></a-text>
+                </a-sphere>
+
+                <!-- Hotspot 2: LAN Ports -->
+                <a-box
+                    class="clickable"
+                    position="0.5 0.3 0.4"
+                    width="0.3" height="0.15" depth="0.2"
+                    color="#2563eb"
+                    data-name="LAN Ports (1-4)"
+                    data-status="Gigabit Ethernet"
+                    data-desc="Connects local wired client devices (PC, Smart TV, Switch) to local subnet. Green light indicates link established.">
+                    <a-text value="LAN PORTS" align="center" position="0 0.2 0" scale="0.5 0.5 0.5" color="#ffffff"></a-text>
+                </a-box>
+
+                <!-- Hotspot 3: WAN / Internet Gateway Port -->
+                <a-box
+                    class="clickable"
+                    position="0 0.3 0.4"
+                    width="0.2" height="0.15" depth="0.2"
+                    color="#f59e0b"
+                    data-name="WAN / Internet Gateway"
+                    data-status="ISP Link Active"
+                    data-desc="Receives incoming broadband connection from Modem/ISP. Amber light indicates IP configuration required.">
+                    <a-text value="WAN" align="center" position="0 0.2 0" scale="0.5 0.5 0.5" color="#ffffff"></a-text>
+                </a-box>
+
+                <!-- Hotspot 4: Wi-Fi Antennas -->
+                <a-cylinder
+                    class="clickable"
+                    position="0 0.8 -0.3"
+                    radius="0.05" height="0.6"
+                    color="#38bdf8"
+                    data-name="Dual-Band Wi-Fi Antennas"
+                    data-status="2.4GHz & 5GHz On"
+                    data-desc="Broadcasts wireless signal for mobile & desktop clients. Check channel interference if wireless signal drops.">
+                    <a-text value="Wi-Fi" align="center" position="0 0.4 0" scale="0.5 0.5 0.5" color="#ffffff"></a-text>
+                </a-cylinder>
+
+            </a-entity>
+
+        </a-marker>
+
+        <a-entity camera></a-entity>
+
+    </a-scene>
+
+    <script>
+        const scene = document.querySelector("a-scene");
+        const marker = document.querySelector("#networkMarker");
+        const statusDot = document.querySelector("#statusDot");
+        const statusText = document.querySelector("#statusText");
+
+        const compTitle = document.querySelector("#compTitle");
+        const compBadge = document.querySelector("#compBadge");
+        const compDesc = document.querySelector("#compDesc");
+        const compActions = document.querySelector("#compActions");
+
+        // Marker Detection Events
+        marker.addEventListener("markerFound", () => {
+            statusDot.className = "dot-indicator";
+            statusText.innerText = "Network Marker Detected";
+            compTitle.innerText = "📡 3D Router Hardware";
+            compBadge.innerText = "Tracking";
+            compBadge.className = "badge badge-active";
+            compDesc.innerText = "Drag anywhere to rotate the router 360°. Tap a glowing indicator (POWER, LAN, WAN, Wi-Fi) to inspect it.";
+        });
+
+        marker.addEventListener("markerLost", () => {
+            statusDot.className = "dot-indicator warning";
+            statusText.innerText = "Searching for Marker...";
+            compTitle.innerText = "📷 Point at Network Marker";
+            compBadge.innerText = "Searching";
+            compBadge.className = "badge badge-warning";
+            compDesc.innerText = "Make sure the printed marker is well-lit and fully visible to your camera.";
+            compActions.style.display = "none";
+        });
+
+        // Shows the inspector panel content for one hotspot entity - shared
+        // by both the legacy A-Frame cursor click (kept as a harmless mouse
+        // fallback for desktop) and the manual tap-raycast system below.
+        function showHotspotInfo (el) {
+            const name = el.getAttribute("data-name");
+            const status = el.getAttribute("data-status");
+            const desc = el.getAttribute("data-desc");
+
+            compTitle.innerText = "🔍 " + name;
+            compBadge.innerText = status;
+            compBadge.className = "badge badge-active";
+            compDesc.innerText = desc;
+            compActions.style.display = "block";
+        }
+
+        // Clickable Hotspot Interaction (desktop mouse fallback via
+        // A-Frame's cursor/raycaster component - see manual system below
+        // for the reliable touch path).
+        const clickables = document.querySelectorAll(".clickable");
+        clickables.forEach(el => {
+            el.addEventListener("click", () => showHotspotInfo(el));
+        });
+
+        // A-Frame's cursor component only re-runs its raycaster intersection
+        // on a throttled tick (default interval: 100ms) and derives "click"
+        // from whatever the last intersection happened to be at touchend -
+        // on a real device a quick tap very often lands between ticks, so
+        // taps get silently dropped (matches the "works maybe 1 in 10 tries"
+        // symptom). This bypasses that entirely: on every tap we raycast
+        // directly against the current camera + hotspot meshes right at that
+        // instant, the same fix already proven for the markerless AR page.
+        (function setupManualTapInspect () {
+            const TAP_MOVE_THRESHOLD_PX = 12;
+            const TAP_MAX_DURATION_MS = 400;
+
+            const tapRaycaster = new THREE.Raycaster();
+
+            function getNDC (clientX, clientY) {
+                return new THREE.Vector2(
+                    (clientX / window.innerWidth) * 2 - 1,
+                    -(clientY / window.innerHeight) * 2 + 1
+                );
+            }
+
+            function handleTapInspect (clientX, clientY) {
+                if (!scene.camera) return;
+                tapRaycaster.setFromCamera(getNDC(clientX, clientY), scene.camera);
+                const objects = Array.from(document.querySelectorAll(".clickable")).map(el => el.object3D);
+                const hits = tapRaycaster.intersectObjects(objects, true);
+                if (hits.length === 0) return;
+                let obj = hits[0].object;
+                while (obj && !obj.el) obj = obj.parent;
+                if (obj && obj.el) showHotspotInfo(obj.el);
+            }
+
+            let startX = 0, startY = 0, startTime = 0;
+
+            document.addEventListener("touchstart", (e) => {
+                const t = e.touches[0];
+                if (!t) return;
+                startX = t.clientX;
+                startY = t.clientY;
+                startTime = Date.now();
+            }, { passive: true });
+
+            document.addEventListener("touchend", (e) => {
+                const t = e.changedTouches[0];
+                if (!t) return;
+                const dx = t.clientX - startX;
+                const dy = t.clientY - startY;
+                const moved = Math.sqrt(dx * dx + dy * dy);
+                const duration = Date.now() - startTime;
+                if (moved < TAP_MOVE_THRESHOLD_PX && duration < TAP_MAX_DURATION_MS) {
+                    handleTapInspect(t.clientX, t.clientY);
+                }
+            }, { passive: true });
+        })();
+
+        // Drag-to-rotate: lets you see all sides of the router (front
+        // ports, back, top) without needing to physically move the phone
+        // to an awkward angle relative to the marker. This listens
+        // passively (no preventDefault) so it never blocks the normal
+        // hotspot tap/click handling above - a short tap still just taps,
+        // only a real drag rotates.
+        //
+        // IMPORTANT: this rotates via quaternion premultiply on fixed
+        // parent-space axes, NOT by accumulating rotation.x/rotation.y
+        // Euler values. Accumulating plain Euler angles seems fine at
+        // first, but after you've yawed (spun left/right) a fair amount,
+        // a further "pitch" drag no longer tilts the model toward/away
+        // from you - it starts rolling it sideways instead, because the
+        // model's local X axis has been carried along by the earlier Y
+        // rotation. That's exactly what caused "stuck on the side view,
+        // can't reach front/back" - premultiplying keeps left/right drag
+        // = spin around one fixed vertical axis and up/down drag = tilt
+        // around one fixed horizontal axis, no matter how much you've
+        // already rotated it.
+        (function setupDragRotate () {
+            const routerGroup = document.querySelector("#routerGroup");
+            const DRAG_THRESHOLD = 6; // px before a touch counts as "dragging" not "tapping"
+            const RADIANS_PER_PIXEL = 0.01;
+
+            let dragging = false;
+            let moved = false;
+            let startX = 0, startY = 0;
+            let lastX = 0, lastY = 0;
+
+            function start (x, y) {
+                dragging = true;
+                moved = false;
+                startX = lastX = x;
+                startY = lastY = y;
+            }
+
+            function move (x, y) {
+                if (!dragging) return;
+                const totalDx = x - startX;
+                const totalDy = y - startY;
+                if (!moved && (Math.abs(totalDx) > DRAG_THRESHOLD || Math.abs(totalDy) > DRAG_THRESHOLD)) {
+                    moved = true;
+                }
+                if (!moved) return;
+
+                const dx = x - lastX;
+                const dy = y - lastY;
+                lastX = x;
+                lastY = y;
+
+                const obj3d = routerGroup.object3D;
+                const yawQuat = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), dx * RADIANS_PER_PIXEL);
+                const pitchQuat = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), -dy * RADIANS_PER_PIXEL);
+                obj3d.quaternion.premultiply(yawQuat).premultiply(pitchQuat);
+            }
+
+            function end () {
+                dragging = false;
+            }
+
+            document.addEventListener("touchstart", (e) => {
+                const t = e.touches[0];
+                if (t) start(t.clientX, t.clientY);
+            }, { passive: true });
+            document.addEventListener("touchmove", (e) => {
+                const t = e.touches[0];
+                if (t) move(t.clientX, t.clientY);
+            }, { passive: true });
+            document.addEventListener("touchend", end, { passive: true });
+
+            // Mouse equivalents, for testing in a desktop browser.
+            document.addEventListener("mousedown", (e) => start(e.clientX, e.clientY));
+            document.addEventListener("mousemove", (e) => { if (dragging) move(e.clientX, e.clientY); });
+            document.addEventListener("mouseup", end);
+        })();
+    </script>
+
+</body>
+</html>
