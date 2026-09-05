@@ -254,11 +254,23 @@
                 if (!scene.camera) return;
                 tapRaycaster.setFromCamera(getNDC(clientX, clientY), scene.camera);
                 const objects = Array.from(document.querySelectorAll(".clickable")).map(el => el.object3D);
-                const hits = tapRaycaster.intersectObjects(objects, true);
-                if (hits.length === 0) return;
-                let obj = hits[0].object;
-                while (obj && !obj.el) obj = obj.parent;
-                if (obj && obj.el) showHotspotInfo(obj.el);
+                // Recursive raycast can hit a hotspot's own floating <a-text>
+                // label (e.g. the "POWER" text sitting above the sphere) -
+                // that's a separate entity with its own .el but no data-name
+                // of its own. Climbing to the first ancestor with *any* .el
+                // stopped right there and silently failed. closest()
+                // walks the real DOM tree up to the actual hotspot entity
+                // that carries data-name, same fix as the nested-box PC tap
+                // bug on the markerless page.
+                for (const hit of hits) {
+                    let obj = hit.object;
+                    while (obj && !obj.el) obj = obj.parent;
+                    const target = obj && obj.el && obj.el.closest("[data-name]");
+                    if (target) {
+                        showHotspotInfo(target);
+                        return;
+                    }
+                }
             }
 
             let startX = 0, startY = 0, startTime = 0;
